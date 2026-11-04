@@ -85,7 +85,7 @@ function drawStats() {
   box.replaceChildren();
   PHASES.forEach((p) => {
     const n = shipments.filter((s) => p.steps.includes(s.status)).length;
-    const b = h('button', { type: 'button', class: 'stat', 'aria-pressed': String(phaseFilter === p.key),
+    const b = h('button', { type: 'button', class: 'stat', 'data-phase': p.key, 'aria-pressed': String(phaseFilter === p.key),
       onclick: () => { phaseFilter = phaseFilter === p.key ? '' : p.key; $('filter').value = ''; draw(); } },
       h('span', { class: 'n' }, n), h('span', { class: 't' }, p.label));
     box.append(b);
@@ -112,8 +112,8 @@ function draw() {
       h('td', { class: 'mono' }, s.tracking_code),
       h('td', {}, s.client_name, h('div', { class: 'mut' }, s.client_phone || '')),
       h('td', { class: 'hide-m' }, s.description || ''),
-      h('td', {}, h('span', { class: 'pill' + (ph?.key === 'retrait' || ph?.key === 'livre' ? ' ok' : '') }, LABELS[s.status] || s.status),
-        h('div', { class: 'mini' }, h('span', { style: 'width:' + pct + '%' }))),
+      h('td', {}, h('span', { class: 'pill' + (ph?.key === 'retrait' || ph?.key === 'livre' ? ' ok' : ''), 'data-phase': ph?.key || '' }, LABELS[s.status] || s.status),
+        h('div', { class: 'mini', 'data-phase': ph?.key || '' }, h('span', { style: 'width:' + pct + '%' }))),
       h('td', {}, h('button', { class: 'sec sm', type: 'button', onclick: () => { openId = openId === s.id ? null : s.id; draw(); } }, openId === s.id ? 'Fermer' : 'Gérer'))
     ));
     if (openId === s.id) body.append(detailRow(s));
