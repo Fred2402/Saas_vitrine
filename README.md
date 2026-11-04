@@ -37,6 +37,8 @@ Client (page de suivi)  ──►  Supabase (Postgres, Auth, RLS)  ◄──  Ba
                 Message WhatsApp ────┘  (chatbot : contexte en base + modèle de langage)
 ```
 
+![Workflows n8n](docs/workflows.png)
+
 | Brique | Rôle |
 |---|---|
 | Supabase | Base Postgres, authentification du transitaire, sécurité par ligne (RLS) |
