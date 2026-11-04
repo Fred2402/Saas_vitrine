@@ -1,0 +1,171 @@
+{
+  "name": "Chatbot WhatsApp multi-clients",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "GET", "path": "whatsapp-bot", "responseMode": "responseNode", "options": {} },
+      "id": "n01",
+      "name": "Vérification Meta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "wa-bot-verify"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ ($json.query['hub.mode'] === 'subscribe' && $json.query['hub.verify_token'] === $env.WA_VERIFY_TOKEN) ? $json.query['hub.challenge'] : 'refuse' }}",
+        "options": {}
+      },
+      "id": "n02",
+      "name": "Répondre vérification",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [260, 0]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "whatsapp-bot", "responseMode": "onReceived", "options": {} },
+      "id": "n03",
+      "name": "Message entrant",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 240],
+      "webhookId": "wa-bot-incoming"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst value = body.entry?.[0]?.changes?.[0]?.value;\nconst msg = value?.messages?.[0];\nif (!msg || msg.type !== 'text') return [];\nreturn [{ json: { phone_number_id: value.metadata.phone_number_id, wa_id: msg.from, text: msg.text.body, message_id: msg.id } }];"
+      },
+      "id": "n04",
+      "name": "Extraire message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_chat_context",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_phone_number_id: $json.phone_number_id, p_wa_id: $json.wa_id }) }}",
+        "options": {}
+      },
+      "id": "n05",
+      "name": "Charger contexte",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst inc = $('Extraire message').first().json;\nif (!ctx || !ctx.tenant || !ctx.tenant.active) return [];\nconst t = ctx.tenant;\nconst messages = (ctx.history || []).map(m => ({ role: m.role, content: m.content }));\nmessages.push({ role: 'user', content: inc.text });\nwhile (messages.length && messages[0].role !== 'user') messages.shift();\nconst system = [\n  `Tu es l'assistant virtuel de ${t.business_name}. Tu réponds aux clients sur WhatsApp au nom de l'entreprise.`,\n  t.system_prompt || '',\n  'BASE DE CONNAISSANCES :',\n  t.knowledge_base || '',\n  'RÈGLES :',\n  '- Réponds en français, en 3 phrases maximum, sans emoji et sans mise en forme markdown.',\n  `- Utilise uniquement la base de connaissances. Si l'information manque, indique que la demande est transmise à l'équipe et termine par le marqueur [ESCALADE].`,\n  `- N'invente jamais de prix, de délai ni de promesse.`,\n  `- Pour un rendez-vous : demande le nom, la date et l'heure souhaitées, puis indique que l'équipe confirme.`\n].join('\\n');\nreturn [{ json: { system, messages, tenant: t } }];"
+      },
+      "id": "n06",
+      "name": "Construire requête",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LLM_API_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.LLM_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.LLM_MODEL, max_tokens: 400, system: $json.system, messages: $json.messages }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "n07",
+      "name": "Générer réponse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 240],
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nlet text = (r.content && r.content[0] && r.content[0].text) ? r.content[0].text.trim() : '';\nconst inc = $('Extraire message').first().json;\nconst ctx = $('Construire requête').first().json;\nconst escalade = text.includes('[ESCALADE]');\ntext = text.replace('[ESCALADE]', '').trim();\nif (!text) return [];\nreturn [{ json: { reply: text, escalade, to: inc.wa_id, phone_number_id: inc.phone_number_id, user_text: inc.text, tenant_id: ctx.tenant.id, wa_token: ctx.tenant.wa_token || $env.WA_TOKEN } }];"
+      },
+      "id": "n08",
+      "name": "Extraire réponse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $json.phone_number_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.wa_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.to, type: 'text', text: { body: $json.reply } }) }}",
+        "options": {}
+      },
+      "id": "n09",
+      "name": "Envoyer WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ tenant_id: $('Extraire réponse').first().json.tenant_id, wa_id: $('Extraire réponse').first().json.to, role: 'user', content: $('Extraire réponse').first().json.user_text }, { tenant_id: $('Extraire réponse').first().json.tenant_id, wa_id: $('Extraire réponse').first().json.to, role: 'assistant', content: $('Extraire réponse').first().json.reply, escalated: $('Extraire réponse').first().json.escalade }]) }}",
+        "options": {}
+      },
+      "id": "n10",
+      "name": "Enregistrer échange",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1820, 240]
+    }
+  ],
+  "connections": {
+    "Vérification Meta": { "main": [[{ "node": "Répondre vérification", "type": "main", "index": 0 }]] },
+    "Message entrant": { "main": [[{ "node": "Extraire message", "type": "main", "index": 0 }]] },
+    "Extraire message": { "main": [[{ "node": "Charger contexte", "type": "main", "index": 0 }]] },
+    "Charger contexte": { "main": [[{ "node": "Construire requête", "type": "main", "index": 0 }]] },
+    "Construire requête": { "main": [[{ "node": "Générer réponse", "type": "main", "index": 0 }]] },
+    "Générer réponse": { "main": [[{ "node": "Extraire réponse", "type": "main", "index": 0 }]] },
+    "Extraire réponse": { "main": [[{ "node": "Envoyer WhatsApp", "type": "main", "index": 0 }]] },
+    "Envoyer WhatsApp": { "main": [[{ "node": "Enregistrer échange", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

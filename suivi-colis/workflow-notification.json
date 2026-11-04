@@ -1,0 +1,112 @@
+{
+  "name": "Notification WhatsApp suivi de colis",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "colis-event", "responseMode": "onReceived", "options": {} },
+      "id": "s01",
+      "name": "Événement colis",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "colis-event-hook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $input.first().json;\nconst secret = req.headers && req.headers['x-webhook-secret'];\nif (!secret || secret !== $env.WEBHOOK_SECRET) return [];\nconst body = req.body || {};\nconst rec = body.record;\nif (body.type !== 'INSERT' || !rec || !rec.id) return [];\nreturn [{ json: { event_id: rec.id } }];"
+      },
+      "id": "s02",
+      "name": "Vérifier et extraire",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_shipment_notification",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_event_id: $json.event_id }) }}",
+        "options": {}
+      },
+      "id": "s03",
+      "name": "Charger détails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nif (!d || !d.shipment || !d.shipment.client_phone || !d.forwarder || !d.forwarder.phone_number_id) return [];\nconst labels = {\n  enregistre: `Colis enregistré`,\n  recu_entrepot: `Colis reçu à l'entrepôt en Chine`,\n  groupage: `Colis intégré au groupage`,\n  expedie: `Conteneur expédié`,\n  en_transit: `En transit maritime`,\n  arrive_port: `Arrivé au port de destination`,\n  dedouanement: `En cours de dédouanement`,\n  disponible: `Disponible au retrait`,\n  livre: `Livré`\n};\nlet to = String(d.shipment.client_phone).replace(/\\D/g, '');\nif (to.startsWith('00')) to = to.slice(2);\nconst label = labels[d.event.status] || d.event.status;\nconst link = `${$env.TRACKING_BASE_URL}?code=${d.shipment.tracking_code}`;\nreturn [{ json: {\n  to,\n  phone_number_id: d.forwarder.phone_number_id,\n  wa_token: d.forwarder.wa_token || $env.WA_TOKEN,\n  template: $env.WA_TEMPLATE_TRACKING || 'suivi_colis',\n  params: [d.shipment.client_name, label, d.shipment.tracking_code, link],\n  event_id: d.event.id\n} }];"
+      },
+      "id": "s04",
+      "name": "Préparer message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $json.phone_number_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.wa_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.to, type: 'template', template: { name: $json.template, language: { code: 'fr' }, components: [{ type: 'body', parameters: $json.params.map(t => ({ type: 'text', text: String(t) })) }] } }) }}",
+        "options": {}
+      },
+      "id": "s05",
+      "name": "Envoyer modèle WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 0]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/shipment_events?id=eq.{{ $('Préparer message').item.json.event_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ notified_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "s06",
+      "name": "Marquer notifié",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 0]
+    }
+  ],
+  "connections": {
+    "Événement colis": { "main": [[{ "node": "Vérifier et extraire", "type": "main", "index": 0 }]] },
+    "Vérifier et extraire": { "main": [[{ "node": "Charger détails", "type": "main", "index": 0 }]] },
+    "Charger détails": { "main": [[{ "node": "Préparer message", "type": "main", "index": 0 }]] },
+    "Préparer message": { "main": [[{ "node": "Envoyer modèle WhatsApp", "type": "main", "index": 0 }]] },
+    "Envoyer modèle WhatsApp": { "main": [[{ "node": "Marquer notifié", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

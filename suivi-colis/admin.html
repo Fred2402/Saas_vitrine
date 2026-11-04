@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Gestion des colis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  /* Concept : tableau de bord de quai. Les cinq phases du voyage en haut, la liste des colis dessous. */
+  :root {
+    --bg: #eef2f5; --surface: #ffffff; --ink: #0c2236; --mut: #5a6b7b; --line: #d5dee6; --row: #f6f9fb;
+    --accent: #0e7c86; --accent-ink: #ffffff; --accent-soft: #d9eef0; --track: #cfdae3;
+    --warn: #8a5200; --warn-soft: #fbeed6; --ok: #17703f; --ok-soft: #dcf1e5;
+    --err: #b3261e; --err-soft: #fbe4e2;
+    --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+    --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #09141e; --surface: #102130; --ink: #e8eff5; --mut: #8ea2b4; --line: #213648; --row: #0d1b29;
+    --accent: #4fc3cd; --accent-ink: #04222a; --accent-soft: #12373f; --track: #24384a;
+    --warn: #f0b45a; --warn-soft: #3a2c10; --ok: #66d49a; --ok-soft: #123824;
+    --err: #ff9a92; --err-soft: #3d1b19; color-scheme: dark; } }
+  :root[data-theme="dark"] {
+    --bg: #09141e; --surface: #102130; --ink: #e8eff5; --mut: #8ea2b4; --line: #213648; --row: #0d1b29;
+    --accent: #4fc3cd; --accent-ink: #04222a; --accent-soft: #12373f; --track: #24384a;
+    --warn: #f0b45a; --warn-soft: #3a2c10; --ok: #66d49a; --ok-soft: #123824;
+    --err: #ff9a92; --err-soft: #3d1b19; color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body);
+         padding-block: 0 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .shell { max-width: 1040px; margin: 0 auto; }
+  h1, h2 { font-family: var(--f-display); margin: 0; letter-spacing: -.01em; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 17px; }
+  label { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); margin-bottom: 5px; }
+  input, select { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: 15px var(--f-body); background: var(--surface); color: var(--ink); }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  button { padding: 10px 18px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font: 600 15px var(--f-body); cursor: pointer; }
+  button.sec { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  button.sm { padding: 6px 12px; font-size: 13px; }
+  button:disabled { opacity: .6; cursor: default; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+  .mut { color: var(--mut); font-size: 13px; }
+  .mono { font-family: var(--f-mono); font-weight: 600; letter-spacing: .02em; }
+  .msg { padding: 11px 14px; border-radius: 10px; font-size: 14px; font-weight: 500; margin-bottom: 14px; }
+  .msg.err { background: var(--err-soft); color: var(--err); }
+  .msg.ok { background: var(--ok-soft); color: var(--ok); }
+
+  #login { max-width: 400px; margin: 12vh auto 0; }
+  #login h1 { margin-bottom: 4px; }
+  #login .mut { margin: 0 0 18px; }
+  #login form > div + div { margin-top: 12px; }
+
+  header.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 20px 0 18px; flex-wrap: wrap; }
+  .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .stat { text-align: left; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 12px; box-shadow: none; }
+  .stat .n { font: 700 30px/1 var(--f-display); display: block; }
+  .stat .t { font-size: 13px; color: var(--mut); display: block; margin-top: 6px; }
+  .stat[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .panel { margin-top: 18px; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .bar input { flex: 1 1 200px; min-width: 0; }
+  .bar select { width: auto; flex: 0 1 220px; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; background: var(--accent-soft); color: var(--accent); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .mini { height: 4px; border-radius: 2px; background: var(--track); margin-top: 7px; min-width: 90px; }
+  .mini span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+  .detail td { background: var(--row); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .events { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--mut); display: grid; gap: 4px; }
+  .events li::before { content: "- "; }
+  #empty { text-align: center; padding: 28px 0 10px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hide-m { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <section id="login" class="card" hidden>
+    <h1>Connexion</h1>
+    <p class="mut">Espace réservé au transitaire.</p>
+    <form id="login-form">
+      <div><label for="email">Email</label><input id="email" type="email" autocomplete="username" required></div>
+      <div><label for="pwd">Mot de passe</label><input id="pwd" type="password" autocomplete="current-password" required></div>
+      <button type="submit" style="margin-top:16px;width:100%">Se connecter</button>
+    </form>
+    <div id="login-msg" class="msg err" style="margin:14px 0 0" hidden></div>
+  </section>
+
+  <section id="app" hidden>
+    <header class="top">
+      <div><h1 id="company">Gestion des colis</h1><div class="mut" id="who"></div></div>
+      <button class="sec sm" id="logout" type="button">Déconnexion</button>
+    </header>
+
+    <div id="app-msg" class="msg" role="status" hidden></div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="card panel">
+      <div class="panel-head">
+        <h2>Nouveau colis</h2>
+        <button class="sec sm" id="toggle-new" type="button" aria-expanded="false" aria-controls="new-form">Ouvrir le formulaire</button>
+      </div>
+      <form id="new-form" hidden>
+        <div class="grid">
+          <div><label for="n-client">Client</label><input id="n-client" required></div>
+          <div><label for="n-phone">WhatsApp (format international)</label><input id="n-phone" placeholder="24101234567" inputmode="numeric"></div>
+          <div><label for="n-desc">Contenu</label><input id="n-desc"></div>
+          <div><label for="n-weight">Poids (kg)</label><input id="n-weight" type="number" step="0.01" min="0"></div>
+          <div><label for="n-cont">Conteneur</label><input id="n-cont"></div>
+          <div><label for="n-eta">Arrivée estimée</label><input id="n-eta" type="date"></div>
+        </div>
+        <div class="actions"><button type="submit">Enregistrer le colis</button></div>
+      </form>
+    </div>
+
+    <div class="card panel">
+      <div class="panel-head"><h2>Colis</h2></div>
+      <div class="bar">
+        <input id="search" placeholder="Rechercher un client, un code, un conteneur" aria-label="Rechercher">
+        <select id="filter" aria-label="Filtrer par statut"></select>
+        <button class="sec" id="refresh" type="button">Actualiser</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Client</th><th class="hide-m">Contenu</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="mut" id="empty" hidden>Aucun colis pour cette sélection.</p>
+    </div>
+  </section>
+</div>
+
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
